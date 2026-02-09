@@ -1,0 +1,11 @@
+#Logs
+*.log
+
+#Java
+*.class
+
+#Python
+_pycache_/
+
+#Environment files
+.env
