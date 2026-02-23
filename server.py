@@ -16,7 +16,12 @@ users={
 
 
 def handle_client(conn):
-    data = conn.recv(1024).decode().strip()
+    conn.settimeout(5)
+    try:
+        data = conn.recv(1024).decode().strip()
+    except socket.timeout:
+        print("Connection timed out.")
+        return
 
     parts = data.split()
 
