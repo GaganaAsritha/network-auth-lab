@@ -1,13 +1,14 @@
+import bcrypt
 import socket
-import hashlib
 import time
 
 HOST = "127.0.0.1"
 PORT = 5000
 
 
-def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+def hash_password(password: str) -> bytes:
+    salt=bcrypt.gensalt()
+    return bcrypt.hashpw(password.encode(), salt)
 
 
 users={
@@ -45,8 +46,7 @@ def handle_client(conn, client_ip):
         return
     
     if username in users:
-        hashed_input = hash_password(password)
-        if hashed_input == users[username]:
+        if bcrypt.checkpw(password.encode(), users[username]):
             conn.sendall("SUCCESS\n".encode())
             return 
         
