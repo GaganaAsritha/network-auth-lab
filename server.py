@@ -7,6 +7,9 @@ HOST = "127.0.0.1"
 PORT = 5000
 
 lock = threading.Lock()
+active_connections = 0
+connection_lock = threading.Lock()
+MAX_CONNECTIONS = 5
 
 
 def hash_password(password: str) -> bytes:
@@ -27,48 +30,51 @@ WINDOW_SECONDS = 10
 
 
 def handle_client(conn, client_ip):
+    global active_connections
     conn.settimeout(5)
 
     try:
-        data = conn.recv(1024).decode().strip()
-    except socket.timeout:
-        print("Connection timed out.")
-        conn.close()
-        return
+        try:
+              data = conn.recv(1024).decode().strip()
+        except socket.timeout:
+              print("Connection timed out.")
+              return
 
-    parts = data.split()
+        parts = data.split()
 
-    if len(parts) != 3 or parts[0] != "LOGIN":
-        conn.sendall("FAIL\n".encode())
-        conn.close()
-        return
+        if len(parts) != 3 or parts[0] != "LOGIN":
+               conn.sendall("FAIL\n".encode())
+               return
     
-    _,username,password = parts
+        _,username,password = parts
 
-    with lock:
-        if is_rate_limited(username, failed_login_user) or \
-           is_rate_limited(client_ip,failed_login_ip):
-            conn.sendall("FAIL\n".encode())
-            conn.close()
-            return
-        
-    auth_success = False
-
-    if username in users:
-        if bcrypt.checkpw(password.encode(), users[username]):
-            auth_success = True
-
-    if not auth_success:
         with lock:
-            record_failure(username, failed_login_user)
-            record_failure(client_ip, failed_login_ip)
+               if is_rate_limited(username, failed_login_user) or \
+                 is_rate_limited(client_ip,failed_login_ip):
+                       conn.sendall("FAIL\n".encode())
+                       return
+        
+        auth_success = False
 
-        conn.sendall("FAIL\n".encode())
-        conn.close()
-        return
+        if username in users:
+                if bcrypt.checkpw(password.encode(), users[username]):
+                       auth_success = True
+
+        if not auth_success:
+                with lock:
+                       record_failure(username, failed_login_user)
+                       record_failure(client_ip, failed_login_ip)
+
+                conn.sendall("FAIL\n".encode())
+                return
     
-    conn.sendall("SUCCESS\n".encode())
-    conn.close()
+        conn.sendall("SUCCESS\n".encode())
+    finally:
+        with connection_lock:
+              active_connections -= 1
+
+        conn.close()
+        
 
 
 #erase old timestamps
@@ -96,6 +102,7 @@ def record_failure(key,store):
 
 
 def start_server():
+    global active_connections
     with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as s:
         s.bind((HOST,PORT))
         s.listen()
@@ -104,6 +111,11 @@ def start_server():
 
         while True:
             conn, addr = s.accept()
+            with connection_lock:
+                if active_connections >= MAX_CONNECTIONS:
+                    conn.close()
+                    continue
+                active_connections += 1
             client_ip = addr[0]
             
             thread = threading.Thread(target=handle_client,args=(conn, client_ip))
