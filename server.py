@@ -1,9 +1,12 @@
+import threading
 import bcrypt
 import socket
 import time
 
 HOST = "127.0.0.1"
 PORT = 5000
+
+lock = threading.Lock()
 
 
 def hash_password(password: str) -> bytes:
@@ -30,30 +33,42 @@ def handle_client(conn, client_ip):
         data = conn.recv(1024).decode().strip()
     except socket.timeout:
         print("Connection timed out.")
+        conn.close()
         return
 
     parts = data.split()
 
     if len(parts) != 3 or parts[0] != "LOGIN":
         conn.sendall("FAIL\n".encode())
+        conn.close()
         return
     
     _,username,password = parts
 
-    if is_rate_limited(username, failed_login_user) or \
-       is_rate_limited(client_ip,failed_login_ip):
-        conn.sendall("FAIL\n".encode())
-        return
-    
+    with lock:
+        if is_rate_limited(username, failed_login_user) or \
+           is_rate_limited(client_ip,failed_login_ip):
+            conn.sendall("FAIL\n".encode())
+            conn.close()
+            return
+        
+    auth_success = False
+
     if username in users:
         if bcrypt.checkpw(password.encode(), users[username]):
-            conn.sendall("SUCCESS\n".encode())
-            return 
-        
-    record_failure(username,failed_login_user)
-    record_failure(client_ip,failed_login_ip)
+            auth_success = True
 
-    conn.sendall("FAIL\n".encode())
+    if not auth_success:
+        with lock:
+            record_failure(username, failed_login_user)
+            record_failure(client_ip, failed_login_ip)
+
+        conn.sendall("FAIL\n".encode())
+        conn.close()
+        return
+    
+    conn.sendall("SUCCESS\n".encode())
+    conn.close()
 
 
 #erase old timestamps
@@ -90,8 +105,9 @@ def start_server():
         while True:
             conn, addr = s.accept()
             client_ip = addr[0]
-            with conn:
-                handle_client(conn, client_ip)
+            
+            thread = threading.Thread(target=handle_client,args=(conn, client_ip))
+            thread.start()
 
 if __name__ == "__main__":
     start_server() 
